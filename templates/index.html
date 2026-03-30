@@ -89,8 +89,8 @@
 
             .main-content {
                 grid-template-columns: 1fr;
-                gap: 20px;
-                margin-top: 20px;
+                gap: 16px;
+                margin-top: 16px;
             }
 
             header {
@@ -138,8 +138,8 @@
 
             .main-content {
                 grid-template-columns: 1fr;
-                gap: 15px;
-                margin-top: 15px;
+                gap: 16px;
+                margin-top: 16px;
             }
 
             .card {
@@ -356,8 +356,8 @@
             }
 
             .main-content {
-                gap: 12px;
-                margin-top: 12px;
+                gap: 10px;
+                margin-top: 16px;
             }
 
             .card {
@@ -522,7 +522,7 @@
             }
 
             .how-it-works {
-                margin-top: 25px;
+                margin-top: 6px;
                 padding: 16px 12px;
                 border-radius: 12px;
             }
@@ -1157,7 +1157,7 @@
 
         /* How It Works Section */
         .how-it-works {
-            margin-top: 50px;
+            margin-top: 10px;
             padding: 40px;
             background: var(--surface);
             border-radius: 20px;
@@ -1352,7 +1352,7 @@
                             <i class="fas fa-times"></i> Don't Proceed
                         </button>
                         <button class="btn btn-success" id="btn-proceed">
-                            <i class="fas fa-external-link-alt"></i> Proceed Anyway
+                            <i class="fas fa-external-link-alt"></i> Proceed 
                         </button>
                     </div>
                 </div>
@@ -1435,6 +1435,7 @@
 
         let html5QrCode = null;
         let currentUrl = '';
+        let currentPdfResults = [];
 
         // Initialize QR Scanner
         function initScanner() {
@@ -1451,36 +1452,12 @@
                     initScanner();
                 }
 
-                // Get available cameras and prefer rear camera
-                let cameraId = undefined;
-                try {
-                    const cameras = await Html5Qrcode.getCameras();
-                    if (cameras && cameras.length > 0) {
-                        // Prefer rear camera for QR scanning
-                        const rearCamera = cameras.find(c => 
-                            c.label.toLowerCase().includes('back') || 
-                            c.label.toLowerCase().includes('rear') ||
-                            c.label.toLowerCase().includes('environment')
-                        );
-                        cameraId = rearCamera ? rearCamera.id : cameras[0].id;
-                    }
-                } catch (e) {
-                    console.log('Camera enumeration not supported, using default');
-                }
-
-                // Optimized camera configuration for faster QR detection
+                // Simple camera access - minimal constraints
                 await html5QrCode.start(
-                    { 
-                        deviceId: cameraId,
-                        facingMode: "environment",
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    },
+                    { facingMode: "environment" },
                     {
-                        fps: 25,  // Increased from 10 to 25 for faster detection
-                        qrbox: { width: 350, height: 350 },  // Increased from 250x250
-                        aspectRatio: 1.0,
-                        disableFlip: false
+                        fps: 10,
+                        qrbox: { width: 250, height: 250 }
                     },
                     onScanSuccess,
                     onScanFailure
@@ -1490,8 +1467,21 @@
                 stopCameraBtn.style.display = 'flex';
             } catch (err) {
                 console.error('Camera error:', err);
-                alert('Could not access camera. Please check permissions or try uploading an image.');
+                readerElement.style.display = 'none';
                 scannerPlaceholder.style.display = 'flex';
+                startCameraBtn.style.display = 'flex';
+                stopCameraBtn.style.display = 'none';
+                
+                let errorMsg = 'Could not access camera.';
+                if (err.message && err.message.includes('Permission')) {
+                    errorMsg = 'Camera permission denied. Please enable camera access in browser settings.';
+                } else if (err.message && err.message.includes('NotAllowed')) {
+                    errorMsg = 'Camera access blocked. Please grant permission.';
+                } else if (err.message && err.message.includes('NotFound')) {
+                    errorMsg = 'No camera found on this device.';
+                }
+                
+                alert(errorMsg + '\n\nUse image upload or manual URL entry instead.');
             }
         });
 
@@ -1566,6 +1556,15 @@
 
                 if (response.ok) {
                     displayPdfResults(data);
+                    // Auto-scroll to security report on mobile
+                    if (window.innerWidth <= 768) {
+                        setTimeout(() => {
+                            const resultsCard = resultsContainer.closest('.card');
+                            if (resultsCard) {
+                                resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }
+                        }, 50);
+                    }
                 } else {
                     alert('Error: ' + (data.error || 'Failed to process PDF'));
                     loadingState.style.display = 'none';
@@ -1594,61 +1593,175 @@
                 return;
             }
 
-            // Show PDF results modal
-            showPdfResultsModal(data);
+            // Store PDF results globally for access in detail modal
+            currentPdfResults = data.qr_codes;
+
+            // Display PDF results in security report card
+            resultsContainer.classList.add('active');
+
+            // Update risk score circle to show QR count
+            const riskCircle = document.getElementById('risk-circle');
+            const riskScoreValue = document.getElementById('risk-score-value');
+            const riskLabel = document.getElementById('risk-label');
+
+            riskScoreValue.textContent = data.total_found;
+            riskCircle.className = 'risk-score-circle medium';
+            riskLabel.className = 'risk-label medium';
+            riskLabel.textContent = 'PDF SCAN';
+
+            // Update URL display
+            document.getElementById('scanned-url').textContent = `PDF Scan Results - ${data.total_found} QR codes detected`;
+
+            // Update checks list to show each QR code
+            const checksList = document.getElementById('checks-list');
+            checksList.innerHTML = '';
+
+            // Calculate average risk score
+            const avgRisk = Math.round(
+                data.qr_codes.reduce((sum, qr) => sum + (qr.risk_score || 0), 0) / data.qr_codes.length
+            );
+
+            data.qr_codes.forEach((qr, index) => {
+                const checkItem = document.createElement('div');
+                checkItem.className = 'check-item';
+                const riskColor = qr.risk_level === 'low' ? 'success' : qr.risk_level === 'medium' ? 'warning' : 'danger';
+                
+                checkItem.innerHTML = `
+                    <div class="check-icon ${qr.risk_level === 'low' ? 'safe' : qr.risk_level === 'medium' ? 'warning' : 'danger'}">
+                        <i class="fas ${qr.risk_level === 'low' ? 'fa-check' : qr.risk_level === 'medium' ? 'fa-exclamation' : 'fa-times'}"></i>
+                    </div>
+                    <div class="check-content">
+                        <div class="check-name">QR Code #${qr.index} (Page ${qr.page})</div>
+                        <div class="check-message" style="word-break: break-all; font-family: monospace; font-size: 0.85rem;">${qr.url}</div>
+                        <div style="margin-top: 8px; display: flex; gap: 8px;">
+                            <button onclick="showPdfCheckDetails(${index})" style="padding: 6px 12px; background: var(--primary); border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 0.8rem;">
+                                <i class="fas fa-search"></i> View Details
+                            </button>
+                            ${qr.risk_level !== 'high' ? `
+                            <button onclick="window.open('${qr.url.replace(/'/g, "\\'")}', '_blank')" style="padding: 6px 12px; background: var(--success); border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 0.8rem;">
+                                <i class="fas fa-external-link-alt"></i> Open URL
+                            </button>
+                            ` : '<span style="padding: 6px 12px; background: var(--danger); border-radius: 6px; color: white; font-size: 0.8rem;">High Risk - Blocked</span>'}
+                        </div>
+                    </div>
+                    <div class="check-arrow" style="color: var(--${riskColor});">
+                        <strong>${qr.risk_level ? qr.risk_level.toUpperCase() : 'UNKNOWN'}</strong>
+                        <div style="font-size: 0.8rem; color: var(--light);">${qr.risk_score || 0}</div>
+                    </div>
+                `;
+
+                checksList.appendChild(checkItem);
+            });
+
+            // Update recommendation with average risk
+            const recommendationBox = document.getElementById('recommendation-box');
+            const avgRiskLevel = avgRisk === 0 ? 'low' : avgRisk < 50 ? 'medium' : 'high';
+            recommendationBox.className = 'recommendation-box ' + avgRiskLevel;
+            document.getElementById('recommendation-text').textContent = 
+                `PDF contains ${data.total_found} QR codes with an average risk score of ${avgRisk}. ` +
+                (avgRiskLevel === 'low' ? 'Most URLs appear safe to visit.' : 
+                 avgRiskLevel === 'medium' ? 'Some URLs may be suspicious - review each carefully.' :
+                 'Multiple high-risk URLs detected - use caution.');
+
+            // Hide action buttons for PDF results
+            btnProceed.style.display = 'none';
+            btnDontProceed.style.display = 'none';
         }
 
-        function showPdfResultsModal(data) {
-            document.getElementById('modal-title').textContent = `PDF Scan Results (${data.total_found} QR codes found)`;
+        function showPdfCheckDetails(index) {
+            // Retrieve the QR data from stored results
+            const qrData = currentPdfResults[index];
+            
+            if (!qrData) {
+                console.error('QR data not found for index:', index);
+                return;
+            }
+
+            const riskColor = qrData.risk_level === 'low' ? 'success' : qrData.risk_level === 'medium' ? 'warning' : 'danger';
+            
+            document.getElementById('modal-title').textContent = `QR Code #${qrData.index} (Page ${qrData.page}) - Details`;
             
             const modalBody = document.getElementById('modal-body');
             modalBody.innerHTML = '';
 
-            // Summary
-            const summaryDiv = document.createElement('div');
-            summaryDiv.className = 'detail-item';
-            summaryDiv.innerHTML = `
-                <div class="detail-label">Summary</div>
-                <div class="detail-value">${data.message}</div>
+            // Risk Level
+            const riskDiv = document.createElement('div');
+            riskDiv.className = 'detail-item';
+            riskDiv.innerHTML = `
+                <div class="detail-label">Risk Level</div>
+                <div class="detail-value" style="color: var(--${riskColor}); font-weight: 600;">${(qrData.risk_level || 'unknown').toUpperCase()} (Score: ${qrData.risk_score || 0})</div>
             `;
-            modalBody.appendChild(summaryDiv);
+            modalBody.appendChild(riskDiv);
 
-            // Each QR code result
-            data.qr_codes.forEach((qr, index) => {
-                const qrDiv = document.createElement('div');
-                qrDiv.style.marginTop = '20px';
-                qrDiv.style.padding = '15px';
-                qrDiv.style.background = 'var(--darker)';
-                qrDiv.style.borderRadius = '10px';
-                qrDiv.style.borderLeft = `4px solid var(--${qr.risk_level === 'low' ? 'success' : qr.risk_level === 'medium' ? 'warning' : 'danger'})`;
-                
-                const riskColor = qr.risk_level === 'low' ? 'success' : qr.risk_level === 'medium' ? 'warning' : 'danger';
-                
-                qrDiv.innerHTML = `
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <strong style="color: var(--light);">QR Code #${qr.index} (Page ${qr.page})</strong>
-                        <span style="background: var(--${riskColor}); color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">
-                            ${qr.risk_level ? qr.risk_level.toUpperCase() : 'UNKNOWN'} ${qr.risk_score !== undefined ? '(' + qr.risk_score + ')' : ''}
-                        </span>
-                    </div>
-                    <div style="word-break: break-all; font-family: monospace; font-size: 0.85rem; color: #94a3b8; margin-bottom: 10px;">
-                        ${qr.url}
-                    </div>
-                    ${qr.recommendation ? `<div style="font-size: 0.85rem; color: var(--${riskColor});">${qr.recommendation}</div>` : ''}
-                    <div style="margin-top: 10px; display: flex; gap: 10px;">
-                        <button onclick="analyzeUrl('${qr.url.replace(/'/g, "\\'")}')" style="padding: 8px 15px; background: var(--primary); border: none; border-radius: 8px; color: white; cursor: pointer; font-size: 0.85rem;">
-                            <i class="fas fa-search"></i> View Details
-                        </button>
-                        ${qr.risk_level !== 'high' ? `
-                        <button onclick="window.open('${qr.url.replace(/'/g, "\\'")}', '_blank')" style="padding: 8px 15px; background: var(--success); border: none; border-radius: 8px; color: white; cursor: pointer; font-size: 0.85rem;">
-                            <i class="fas fa-external-link-alt"></i> Open URL
-                        </button>
-                        ` : ''}
-                    </div>
+            // URL Content
+            const urlDiv = document.createElement('div');
+            urlDiv.className = 'detail-item';
+            urlDiv.innerHTML = `
+                <div class="detail-label">URL Content</div>
+                <div class="detail-value" style="word-break: break-all; font-family: monospace; font-size: 0.85rem;">${qrData.url}</div>
+            `;
+            modalBody.appendChild(urlDiv);
+
+            // Recommendation
+            if (qrData.recommendation) {
+                const recDiv = document.createElement('div');
+                recDiv.className = 'detail-item';
+                recDiv.innerHTML = `
+                    <div class="detail-label">Recommendation</div>
+                    <div class="detail-value" style="color: var(--${riskColor});">${qrData.recommendation}</div>
                 `;
+                modalBody.appendChild(recDiv);
+            }
+
+            // Security Checks Details
+            if (qrData.checks) {
+                const checksDiv = document.createElement('div');
+                checksDiv.className = 'detail-item';
+                checksDiv.innerHTML = '<div class="detail-label">Security Checks</div>';
                 
-                modalBody.appendChild(qrDiv);
-            });
+                const checksList = document.createElement('div');
+                checksList.style.marginTop = '10px';
+                
+                for (const [key, check] of Object.entries(qrData.checks)) {
+                    const checkName = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    const status = check.status || 'unknown';
+                    const statusColor = status === 'safe' ? 'success' : status === 'warning' ? 'warning' : status === 'danger' ? 'danger' : 'light';
+                    
+                    const checkItem = document.createElement('div');
+                    checkItem.style.padding = '10px';
+                    checkItem.style.background = 'var(--darker)';
+                    checkItem.style.borderRadius = '6px';
+                    checkItem.style.marginBottom = '8px';
+                    checkItem.style.borderLeft = `3px solid var(--${statusColor})`;
+                    
+                    let checkContent = `
+                        <div style="font-weight: 600; color: var(--light);">${checkName}</div>
+                        <div style="font-size: 0.85rem; color: var(--${statusColor}); margin-top: 4px;">${status.toUpperCase()}</div>
+                        <div style="font-size: 0.85rem; color: #94a3b8; margin-top: 4px;">${check.message || 'No details available'}</div>
+                    `;
+                    
+                    // Add additional check details if available
+                    if (check.issues || check.keywords || check.warnings) {
+                        checkContent += `<div style="font-size: 0.8rem; color: #94a3b8; margin-top: 6px;">`;
+                        if (check.issues && check.issues.length > 0) {
+                            checkContent += `<div><strong>Issues:</strong> ${check.issues.join(', ')}</div>`;
+                        }
+                        if (check.keywords && check.keywords.length > 0) {
+                            checkContent += `<div><strong>Keywords:</strong> ${check.keywords.join(', ')}</div>`;
+                        }
+                        if (check.warnings && check.warnings.length > 0) {
+                            checkContent += `<div><strong>Warnings:</strong> ${check.warnings.join(', ')}</div>`;
+                        }
+                        checkContent += `</div>`;
+                    }
+                    
+                    checkItem.innerHTML = checkContent;
+                    checksList.appendChild(checkItem);
+                }
+                
+                checksDiv.appendChild(checksList);
+                modalBody.appendChild(checksDiv);
+            }
 
             modalOverlay.classList.add('active');
         }
@@ -1678,6 +1791,17 @@
             emptyState.style.display = 'none';
             resultsContainer.classList.remove('active');
             loadingState.style.display = 'block';
+
+            // Auto-scroll to security report on mobile screens
+            if (window.innerWidth <= 768) {
+                setTimeout(() => {
+                    // Scroll to the results card (with Security Report header visible)
+                    const resultsCard = resultsContainer.closest('.card');
+                    if (resultsCard) {
+                        resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                }, 50);
+            }
 
             try {
                 const response = await fetch('/api/analyze', {
@@ -1766,10 +1890,18 @@
             document.getElementById('recommendation-text').textContent = data.recommendation;
 
             // Update proceed button visibility based on risk
-            if (data.risk_level === 'high') {
-                btnProceed.style.display = 'none';
-            } else {
+            if (data.risk_score === 0) {
+                // If score is 0, show only proceed button
                 btnProceed.style.display = 'flex';
+                btnDontProceed.style.display = 'none';
+            } else if (data.risk_level === 'high') {
+                // If high risk, hide proceed button only
+                btnProceed.style.display = 'none';
+                btnDontProceed.style.display = 'flex';
+            } else {
+                // Show both buttons
+                btnProceed.style.display = 'flex';
+                btnDontProceed.style.display = 'flex';
             }
         }
 
